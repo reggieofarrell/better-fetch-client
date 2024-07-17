@@ -25,6 +25,11 @@ class BetterFetchClient {
   private initialDelayMs: number;
 
   /**
+   * Object to store AbortController instances for each request.
+   */
+  private abortControllers: { [key: string]: AbortController } = {};
+
+  /**
    * Creates an instance of BetterFetchClient.
    * @param {string} baseUrl - The base URL for the API.
    * @param {Record<string, string>} headers - Default headers for the requests. (default: {})
@@ -53,7 +58,8 @@ class BetterFetchClient {
    * @param {Record<string, any> | null} body - The request body. (default: null)
    * @param {Record<string, string>} customHeaders - Custom headers for the request. (default: {})
    * @param {number} retries - Current retry attempt. (default: 0)
-   * @returns {Promise<RT>} The response data.
+   * @param {string} requestId - The unique identifier for the request. (default: `${method}-${path}-${Date.now()}`)
+   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
    * @throws {ApiResponseError} - If the response status is not OK.
    * @throws {ApiParseError} - If the response JSON parsing fails.
    */
@@ -62,57 +68,76 @@ class BetterFetchClient {
     path: string,
     body: Record<string, any> | null = null,
     customHeaders: Record<string, string> = {},
-    retries: number = 0
-  ): Promise<RT | null> {
+    retries: number = 0,
+    requestId: string = `${method}-${path}-${Date.now()}`
+  ): Promise<{ requestId: string, response: Promise<RT | null> }> {
     const url = `${this.baseUrl}${path}`;
     const headers = new Headers({ ...this.headers, ...customHeaders });
+
+    // Create a new AbortController for this request
+    const abortController = new AbortController();
+    const { signal } = abortController;
+
+    // Store the AbortController in the object
+    this.abortControllers[requestId] = abortController;
 
     const config: RequestInit = {
       method: method,
       headers: headers,
       body: method !== 'GET' && body ? JSON.stringify(body) : null,
+      signal: signal, // Attach the signal to the request
     };
 
-    try {
-      const response = await fetch(url, config);
-      let data: RT | null = null;
-
+    const responsePromise = (async () => {
       try {
-        data = await response.json(); // Always attempt to parse JSON, regardless of response status
-      } catch (err) {
-        throw new ApiParseError(
-          'Failed to parse JSON response',
-          response.status,
-          await response.text(),
-          data
-        );
+        const response = await fetch(url, config);
+        let data: RT | null = null;
+
+        try {
+          data = await response.json(); // Always attempt to parse JSON, regardless of response status
+        } catch (err) {
+          throw new ApiParseError(
+            'Failed to parse JSON response',
+            response.status,
+            await response.text(),
+            data
+          );
+        }
+
+        if (!response.ok) {
+          throw new ApiResponseError(
+            'HTTP error with JSON body',
+            response.status,
+            await response.text(),
+            data
+          );
+        }
+
+        // Remove the AbortController from the object after the request completes
+        delete this.abortControllers[requestId];
+
+        return data;
+      } catch (error) {
+        // Remove the AbortController from the object if an error occurs
+        delete this.abortControllers[requestId];
+
+        // If the request fails, check if we should retry
+        if (retries < this.maxRetries && this.shouldRetry(error)) {
+          // Calculate the delay before retrying
+          const delay = this.initialDelayMs * Math.pow(2, retries);
+          console.log(`Retrying... Attempt ${retries + 1}/${this.maxRetries} in ${delay}ms`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return this.request(method, path, body, customHeaders, retries + 1, requestId).then(res => res.response);
+        } else {
+          // If we should not retry, handle the error
+          this.handleError(error);
+        }
       }
 
-      if (!response.ok) {
-        throw new ApiResponseError(
-          'HTTP error with JSON body',
-          response.status,
-          await response.text(),
-          data
-        );
-      }
+      return null;
+    })();
 
-      return data;
-    } catch (error) {
-      // If the request fails, check if we should retry
-      if (retries < this.maxRetries && this.shouldRetry(error)) {
-        // Calculate the delay before retrying
-        const delay = this.initialDelayMs * Math.pow(2, retries);
-        console.log(`Retrying... Attempt ${retries + 1}/${this.maxRetries} in ${delay}ms`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return this.request(method, path, body, customHeaders, retries + 1);
-      } else {
-        // If we should not retry, handle the error
-        this.handleError(error);
-      }
-    }
-
-    return null;
+    return { requestId, response: responsePromise };
   }
 
   /**
@@ -136,56 +161,68 @@ class BetterFetchClient {
   }
 
   /**
+   * Cancels a request by its identifier.
+   * @param {string} requestId - The unique identifier for the request.
+   */
+  cancelRequest(requestId: string): void {
+    const abortController = this.abortControllers[requestId];
+    if (abortController) {
+      abortController.abort();
+      delete this.abortControllers[requestId];
+    }
+  }
+
+  /**
    * Makes a GET request.
    * @param {string} path - The API endpoint path.
-   * @param {Record<string, string>} headers - Custom headers for the request.
-   * @returns {Promise<RT>} The response data.
+   * @param {Record<string, string>} headers - Custom headers for the request. (default: {})
+   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
    */
-  get<RT = any>(path: string, headers: Record<string, string> = {}): Promise<RT | null> {
-    return this.request('GET', path, null, headers);
+  get<RT = any>(path: string, headers: Record<string, string> = {}) {
+    return this.request<RT>('GET', path, null, headers);
   }
 
   /**
    * Makes a POST request.
    * @param {string} path - The API endpoint path.
    * @param {Record<string, any>} body - The request body.
-   * @param {Record<string, string>} headers - Custom headers for the request.
-   * @returns {Promise<RT>} The response data.
+   * @param {Record<string, string>} headers - Custom headers for the request. (default: {})
+   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
    */
-  post<RT = any>(path: string, body: Record<string, any>, headers: Record<string, string> = {}): Promise<RT | null> {
-    return this.request('POST', path, body, headers);
+  post<RT = any>(path: string, body: Record<string, any>, headers: Record<string, string> = {}) {
+    return this.request<RT>('POST', path, body, headers);
   }
 
   /**
    * Makes a PUT request.
    * @param {string} path - The API endpoint path.
    * @param {Record<string, any>} body - The request body.
-   * @param {Record<string, string>} headers - Custom headers for the request.
-   * @returns {Promise<RT>} The response data.
+   * @param {Record<string, string>} headers - Custom headers for the request. (default: {})
+   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
    */
-  put<RT = any>(path: string, body: Record<string, any>, headers: Record<string, string> = {}): Promise<RT | null> {
-    return this.request('PUT', path, body, headers);
+  put<RT = any>(path: string, body: Record<string, any>, headers: Record<string, string> = {}) {
+    return this.request<RT>('PUT', path, body, headers);
   }
 
   /**
    * Makes a PATCH request.
    * @param {string} path - The API endpoint path.
    * @param {Record<string, any>} body - The request body.
-   * @param {Record<string, string>} headers - Custom headers for the request.
-   * @returns {Promise<RT>} The response data.
+   * @param {Record<string, string>} headers - Custom headers for the request. (default: {})
+   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
    */
-  patch<RT = any>(path: string, body: Record<string, any>, headers: Record<string, string> = {}): Promise<RT | null> {
-    return this.request('PATCH', path, body, headers);
+  patch<RT = any>(path: string, body: Record<string, any>, headers: Record<string, string> = {}) {
+    return this.request<RT>('PATCH', path, body, headers);
   }
 
   /**
    * Makes a DELETE request.
    * @param {string} path - The API endpoint path.
-   * @param {Record<string, string>} headers - Custom headers for the request.
-   * @returns {Promise<RT>} The response data.
+   * @param {Record<string, string>} headers - Custom headers for the request. (default: {})
+   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
    */
-  delete<RT = any>(path: string, headers: Record<string, string> = {}): Promise<RT | null> {
-    return this.request('DELETE', path, null, headers);
+  delete<RT = any>(path: string, headers: Record<string, string> = {}) {
+    return this.request<RT>('DELETE', path, null, headers);
   }
 }
 
