@@ -167,7 +167,7 @@ class BetterFetchClient {
    * @throws The rethrown error.
    */
   handleError(error: any): void {
-    throw error; // Rethrow the error after logging it
+    throw error; // Rethrow the error
   }
 
   /**
