@@ -44,8 +44,9 @@ class BetterFetchClient {
     maxRetries: number = 3,
     initialDelayMs: number = 500
   ) {
+    // Add default Content-Type header
     this.baseUrl = baseUrl;
-    this.headers = new Headers(headers);
+    this.headers = new Headers({ 'Content-Type': 'application/json', ...headers });
     this.withRetry = withRetry;
     this.maxRetries = maxRetries;
     this.initialDelayMs = initialDelayMs;
