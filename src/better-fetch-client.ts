@@ -13,7 +13,7 @@
  * A native fetch based client for making HTTP
  * requests with optional retry logic.
  */
-class BetterFetchClient {
+export class BetterFetchClient {
   /**
    * The base URL for the API.
    */
@@ -240,7 +240,7 @@ class BetterFetchClient {
  * Base class for API errors.
  * @extends Error
  */
-class ApiError extends Error {
+export class ApiError extends Error {
   /**
    * The HTTP status code.
    */
@@ -273,7 +273,7 @@ class ApiError extends Error {
  * Error class for API response errors.
  * @extends ApiError
  */
-class ApiResponseError extends ApiError {
+export class ApiResponseError extends ApiError {
   /**
    * Creates an instance of ApiResponseError.
    * @param {string} message - The error message.
@@ -290,7 +290,7 @@ class ApiResponseError extends ApiError {
  * Error class for API parse errors.
  * @extends ApiError
  */
-class ApiParseError extends ApiError {
+export class ApiParseError extends ApiError {
   /**
    * Creates an instance of ApiParseError.
    * @param {string} message - The error message.
