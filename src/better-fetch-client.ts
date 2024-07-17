@@ -1,4 +1,15 @@
 /**
+ * Configuration options for BetterFetchClient.
+ */
+ interface BetterFetchClientConfig {
+  baseUrl: string;
+  headers?: Record<string, string>;
+  withRetry?: boolean;
+  maxRetries?: number;
+  initialDelayMs?: number;
+}
+
+/**
  * A native fetch based client for making HTTP
  * requests with optional retry logic.
  */
@@ -31,19 +42,17 @@ class BetterFetchClient {
 
   /**
    * Creates an instance of BetterFetchClient.
-   * @param {string} baseUrl - The base URL for the API.
-   * @param {Record<string, string>} headers - Default headers for the requests. (default: {})
-   * @param {boolean} withRetry - Whether to enable retry logic. (default: true)
-   * @param {number} maxRetries - Maximum number of retry attempts. (default: 3)
-   * @param {number} initialDelayMs - Initial delay in milliseconds before retrying. (default: 500)
+   * @param {BetterFetchClientConfig} config - Configuration options for the client.
    */
-  constructor(
-    baseUrl: string,
-    headers: Record<string, string> = {},
-    withRetry: boolean = true,
-    maxRetries: number = 3,
-    initialDelayMs: number = 500
-  ) {
+  constructor(config: BetterFetchClientConfig) {
+    const {
+      baseUrl,
+      headers = {},
+      withRetry = false,
+      maxRetries = 3,
+      initialDelayMs = 500,
+    } = config;
+
     // Add default Content-Type header
     this.baseUrl = baseUrl;
     this.headers = new Headers({ 'Content-Type': 'application/json', ...headers });

@@ -17,7 +17,6 @@ A generic REST API client based on native JavaScript `fetch` with optional retry
       - [DELETE Request](#delete-request)
     - [Handling Errors](#handling-errors)
     - [Cancelling Requests](#cancelling-requests)
-  - [Configuration](#configuration)
   - [License](#license)
 
 ## Installation
@@ -37,8 +36,18 @@ To create an instance of `BetterFetchClient`, you need to provide the base URL f
 ```typescript
 import BetterFetchClient from 'better-fetch-client';
 
-const client = new BetterFetchClient('https://api.example.com');
+const client = new BetterFetchClient({baseUrl: 'https://api.example.com'});
 ```
+
+Configurable options:
+
+- `baseUrl`: The base URL for the API.
+- `headers`: Default headers for the requests.
+- `withRetry`: Whether to enable retry logic.
+- `maxRetries`: Maximum number of retry attempts.
+- `initialDelayMs`: Initial delay in milliseconds before retrying.
+
+For more details, refer to the constructor definition in the code
 
 ### Making Requests
 
@@ -138,23 +147,6 @@ client.cancelRequest(requestId);
  */
 const { requestId, response } = client.get('/endpoint');
 const data = await response;
-```
-
-## Configuration
-
-The `BetterFetchClient` class has several configurable options:
-
-- `baseUrl`: The base URL for the API.
-- `headers`: Default headers for the requests.
-- `withRetry`: Whether to enable retry logic.
-- `maxRetries`: Maximum number of retry attempts.
-- `initialDelayMs`: Initial delay in milliseconds before retrying.
-
-For more details, refer to the constructor definition in the code:
-
-```typescript:src/better-fetch-client.ts
-startLine: 33
-endLine: 46
 ```
 
 ## License
