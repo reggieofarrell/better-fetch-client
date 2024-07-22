@@ -7,6 +7,7 @@
   withRetry?: boolean;
   maxRetries?: number;
   initialDelayMs?: number;
+  name: string;
 }
 
 /**
@@ -21,7 +22,7 @@ export class BetterFetchClient {
   /**
    * Default headers for the requests.
    */
-  private headers: Headers;
+  private headers: Record<string, string>;
   /**
    * Whether to enable retry logic.
    */
@@ -34,11 +35,11 @@ export class BetterFetchClient {
    * Initial delay in milliseconds before retrying.
    */
   private initialDelayMs: number;
-
   /**
-   * Object to store AbortController instances for each request.
+   * The name of the client (to be used in error messages, etc).
+   * Such as "Instagram API Client" or "Facebook API Client"
    */
-  private abortControllers: { [key: string]: AbortController } = {};
+  private name: string;
 
   /**
    * Creates an instance of BetterFetchClient.
@@ -51,103 +52,122 @@ export class BetterFetchClient {
       withRetry = false,
       maxRetries = 3,
       initialDelayMs = 500,
+      name,
     } = config;
 
-    // Add default Content-Type header
+
+    if (!baseUrl) {
+      throw new Error('Base URL is required when setting up a BetterFetchClient');
+    }
+
     this.baseUrl = baseUrl;
-    this.headers = new Headers({ 'Content-Type': 'application/json', ...headers });
+    this.headers = { 'Content-Type': 'application/json', ...headers };
     this.withRetry = withRetry;
     this.maxRetries = maxRetries;
     this.initialDelayMs = initialDelayMs;
+
+    if (!name) {
+      throw new Error('Name is required when setting up BetterFetchClient');
+    }
+
+    this.name = name;
   }
 
   /**
    * Makes an HTTP request.
-   * @param {string} method - The HTTP method (GET, POST, etc.).
+   *
    * @param {string} path - The API endpoint path.
-   * @param {Record<string, any> | null} body - The request body. (default: null)
-   * @param {Record<string, string>} customHeaders - Custom headers for the request. (default: {})
-   * @param {number} retries - Current retry attempt. (default: 0)
-   * @param {string} requestId - The unique identifier for the request. (default: `${method}-${path}-${Date.now()}`)
-   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
+   * @param {any} [body=null] - The request payload.
+   * @param {Omit<RequestInit, 'body'>} [config={}] - Additional fetch configuration options.
+   * @param {number} [retries=this.maxRetries] - Number of retry attempts.
+   * @returns {Promise<{ rawResponse: Response, response: RT | null }>} - The raw response and parsed response data.
    * @throws {ApiResponseError} - If the response status is not OK.
    * @throws {ApiParseError} - If the response JSON parsing fails.
    */
   async request<RT = any>(
-    method: string,
     path: string,
-    body: Record<string, any> | null = null,
-    customHeaders: Record<string, string> = {},
-    retries: number = 0,
-    requestId: string = `${method}-${path}-${Date.now()}`
-  ): Promise<{ requestId: string, response: Promise<RT | null> }> {
+    body: any = null,
+    config: Omit<RequestInit, 'body'> = {},
+    retries: number = this.maxRetries,
+  ): Promise<{ rawResponse: Response, data: RT | null }> {
     const url = `${this.baseUrl}${path}`;
-    const headers = new Headers({ ...this.headers, ...customHeaders });
+    const headers = new Headers({ ...this.headers, ...config.headers });
+    const contentType = headers.get('Content-Type');
+    const method = config.method || 'GET';
 
-    // Create a new AbortController for this request
-    const abortController = new AbortController();
-    const { signal } = abortController;
-
-    // Store the AbortController in the object
-    this.abortControllers[requestId] = abortController;
-
-    const config: RequestInit = {
-      method: method,
+    const requestConfig: RequestInit = {
+      method,
       headers: headers,
-      body: method !== 'GET' && body ? JSON.stringify(body) : null,
-      signal: signal, // Attach the signal to the request
+      body: method !== 'GET' && body ? (contentType === 'application/json' ? JSON.stringify(body) : body as BodyInit) : null,
+      signal: config.signal || null, // Attach the signal to the request for cancelling
     };
 
-    const responsePromise = (async () => {
-      try {
-        const response = await fetch(url, config);
-        let data: RT | null = null;
+    let response: Response;
+    let data: RT | null = null;
 
+    try {
+      response = await fetch(url, requestConfig);
+
+      if (!response.ok) {
+        let errorResponse = null;
         try {
-          data = await response.json(); // Always attempt to parse JSON, regardless of response status
-        } catch (err) {
-          throw new ApiParseError(
-            'Failed to parse JSON response',
-            response.status,
-            await response.text(),
-            data
-          );
+          errorResponse = await response.json();
+        } catch (error) {
+          errorResponse = await response.text();
         }
 
-        if (!response.ok) {
-          throw new ApiResponseError(
-            'HTTP error with JSON body',
-            response.status,
-            await response.text(),
-            data
-          );
-        }
-
-        // Remove the AbortController from the object after the request completes
-        delete this.abortControllers[requestId];
-
-        return data;
-      } catch (error) {
-        // Remove the AbortController from the object if an error occurs
-        delete this.abortControllers[requestId];
-
-        // If the request fails, check if we should retry
-        if (retries < this.maxRetries && this.shouldRetry(error)) {
-          // Calculate the delay before retrying
-          const delay = this.initialDelayMs * Math.pow(2, retries);
-          console.log(`Retrying... Attempt ${retries + 1}/${this.maxRetries} in ${delay}ms`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return this.request(method, path, body, customHeaders, retries + 1, requestId).then(res => res.response);
-        } else {
-          // If we should not retry, handle the error
-          this.handleError(error);
-        }
+        throw new ApiResponseError(
+          `[${this.name}] - HTTP ${response.status} error`,
+          response.status,
+          errorResponse
+        );
       }
 
-      return null;
-    })();
+      try {
+        if (contentType?.includes('application/json')) {
+          data = await response.json() as RT;
+        } else if (contentType?.includes('text/')) {
+          data = await response.text() as unknown as RT;
+        } else if (contentType?.includes('application/blob')) {
+          data = await response.blob() as unknown as RT;
+        } else {
+          throw new Error(`Unsupported response type: ${contentType}`);
+        }
+      } catch (err) {
+        if (err.message.includes('Unsupported response type')) {
+          throw err;
+        }
 
-    return { requestId, response: responsePromise };
+        let errorResponse = null;
+        try {
+          errorResponse = await response.json();
+        } catch (error) {
+          errorResponse = await response.text();
+        }
+
+        throw new ApiParseError(
+          `${this.name} - Failed to parse response`,
+          response.status,
+          errorResponse
+        );
+      }
+
+      return { rawResponse: response, data };
+    } catch (error) {
+      // If the request fails, check if we should retry
+      if (retries < this.maxRetries && this.shouldRetry(error)) {
+        // Calculate the delay before retrying
+        const delay = this.initialDelayMs * Math.pow(2, retries);
+        console.log(`Retrying... Attempt ${retries + 1}/${this.maxRetries} in ${delay}ms`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.request(path, body, config, retries + 1).then(res => res);
+      } else {
+        // If we should not retry, handle the error
+        this.handleError(error);
+      }
+    }
+
+    return { rawResponse: response!, data };
   }
 
   /**
@@ -171,68 +191,51 @@ export class BetterFetchClient {
   }
 
   /**
-   * Cancels a request by its identifier.
-   * @param {string} requestId - The unique identifier for the request.
-   */
-  cancelRequest(requestId: string): void {
-    const abortController = this.abortControllers[requestId];
-    if (abortController) {
-      abortController.abort();
-      delete this.abortControllers[requestId];
-    }
-  }
-
-  /**
    * Makes a GET request.
    * @param {string} path - The API endpoint path.
-   * @param {Record<string, string>} headers - Custom headers for the request. (default: {})
-   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
+   * @param {Omit<RequestInit, 'body'|'method'>} [config={}] - Additional fetch configuration options.
    */
-  get<RT = any>(path: string, headers: Record<string, string> = {}) {
-    return this.request<RT>('GET', path, null, headers);
+  get<RT = any>(path: string, config: Omit<RequestInit, 'body'|'method'> = {}) {
+    return this.request<RT>(path, null, { method: 'GET', ...config });
   }
 
   /**
    * Makes a POST request.
    * @param {string} path - The API endpoint path.
-   * @param {Record<string, any>} body - The request body.
-   * @param {Record<string, string>} headers - Custom headers for the request. (default: {})
-   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
+   * @param {any} body - The request body.
+   * @param {Omit<RequestInit, 'body'|'method'>} [config={}] - Additional fetch configuration options.
    */
-  post<RT = any>(path: string, body: Record<string, any>, headers: Record<string, string> = {}) {
-    return this.request<RT>('POST', path, body, headers);
+  post<RT = any>(path: string, body: any, config: Omit<RequestInit, 'body'|'method'> = {}) {
+    return this.request<RT>(path, body, { method: 'POST', ...config });
   }
 
   /**
    * Makes a PUT request.
    * @param {string} path - The API endpoint path.
-   * @param {Record<string, any>} body - The request body.
-   * @param {Record<string, string>} headers - Custom headers for the request. (default: {})
-   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
+   * @param {any} body - The request body.
+   * @param {Omit<RequestInit, 'body'|'method'>} [config={}] - Additional fetch configuration options.
    */
-  put<RT = any>(path: string, body: Record<string, any>, headers: Record<string, string> = {}) {
-    return this.request<RT>('PUT', path, body, headers);
+  put<RT = any>(path: string, body: any, config: Omit<RequestInit, 'body'|'method'> = {}) {
+    return this.request<RT>(path, body, { method: 'PUT', ...config });
   }
 
   /**
    * Makes a PATCH request.
    * @param {string} path - The API endpoint path.
-   * @param {Record<string, any>} body - The request body.
-   * @param {Record<string, string>} headers - Custom headers for the request. (default: {})
-   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
+   * @param {any} body - The request body.
+   * @param {Omit<RequestInit, 'body'|'method'>} [config={}] - Additional fetch configuration options.
    */
-  patch<RT = any>(path: string, body: Record<string, any>, headers: Record<string, string> = {}) {
-    return this.request<RT>('PATCH', path, body, headers);
+  patch<RT = any>(path: string, body: any, config: Omit<RequestInit, 'body'|'method'> = {}) {
+    return this.request<RT>(path, body, { method: 'PATCH', ...config });
   }
 
   /**
    * Makes a DELETE request.
    * @param {string} path - The API endpoint path.
-   * @param {Record<string, string>} headers - Custom headers for the request. (default: {})
-   * @returns {Promise<{ requestId: string, response: Promise<RT | null> }>} The response data and request ID.
+   * @param {Omit<RequestInit, 'body'|'method'>} [config={}] - Additional fetch configuration options.
    */
-  delete<RT = any>(path: string, headers: Record<string, string> = {}) {
-    return this.request<RT>('DELETE', path, null, headers);
+  delete<RT = any>(path: string, config: Omit<RequestInit, 'body'|'method'> = {}) {
+    return this.request<RT>(path, null, { method: 'DELETE', ...config });
   }
 }
 
@@ -248,24 +251,18 @@ export class ApiError extends Error {
   /**
    * The response text.
    */
-  responseText: string;
-  /**
-   * The parsed response data.
-   */
-  data: any;
+  response: object|string;
 
   /**
    * Creates an instance of ApiError.
    * @param {string} message - The error message.
    * @param {number} status - The HTTP status code.
-   * @param {string} responseText - The response text.
-   * @param {any} data - The parsed response data.
+   * @param {object|string} response - The response.
    */
-  constructor(message: string, status: number, responseText: string, data: any = null) {
+  constructor(message: string, status: number, response: object|string) {
     super(message);
     this.status = status;
-    this.responseText = responseText;
-    this.data = data;
+    this.response = response;
   }
 }
 
@@ -278,11 +275,10 @@ export class ApiResponseError extends ApiError {
    * Creates an instance of ApiResponseError.
    * @param {string} message - The error message.
    * @param {number} status - The HTTP status code.
-   * @param {string} responseText - The response text.
-   * @param {any} data - The parsed response data.
+   * @param {object|string} response - The response body.
    */
-  constructor(message: string, status: number, responseText: string, data: any = null) {
-    super(message, status, responseText, data);
+  constructor(message: string, status: number, response: object|string) {
+    super(message, status, response);
   }
 }
 
@@ -295,10 +291,9 @@ export class ApiParseError extends ApiError {
    * Creates an instance of ApiParseError.
    * @param {string} message - The error message.
    * @param {number} status - The HTTP status code.
-   * @param {string} responseText - The response text.
-   * @param {any} data - The parsed response data.
+   * @param {object|string} response - The response body
    */
-  constructor(message: string, status: number, responseText: string, data: any = null) {
-    super(message, status, responseText, data);
+  constructor(message: string, status: number, response: object|string) {
+    super(message, status, response);
   }
 }

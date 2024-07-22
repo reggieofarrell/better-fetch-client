@@ -1,6 +1,6 @@
 # Better Fetch Client
 
-A generic REST API client based on native JavaScript `fetch` with optional retry logic.
+A generic REST API client based on native JavaScript `fetch` with optional retry logic. Issues and PRs welcome. I'm trying to keep this pretty basic though.
 
 ## Table of Contents
 
@@ -15,8 +15,8 @@ A generic REST API client based on native JavaScript `fetch` with optional retry
       - [PUT Request](#put-request)
       - [PATCH Request](#patch-request)
       - [DELETE Request](#delete-request)
+      - [Raw Response](#raw-response)
     - [Handling Errors](#handling-errors)
-    - [Cancelling Requests](#cancelling-requests)
   - [License](#license)
 
 ## Installation
@@ -36,7 +36,7 @@ To create an instance of `BetterFetchClient`, you need to provide the base URL f
 ```typescript
 import BetterFetchClient from 'better-fetch-client';
 
-const client = new BetterFetchClient({baseUrl: 'https://api.example.com'});
+const client = new BetterFetchClient({ baseUrl: 'https://api.example.com', name: 'Example API Client' });
 ```
 
 Configurable options:
@@ -46,8 +46,9 @@ Configurable options:
 - `withRetry`: Whether to enable retry logic.
 - `maxRetries`: Maximum number of retry attempts.
 - `initialDelayMs`: Initial delay in milliseconds before retrying.
+- `name`: The name of the client (to be used in error messages, etc).
 
-For more details, refer to the constructor definition in the code
+For more details, refer to the constructor definition in the code.
 
 ### Making Requests
 
@@ -57,8 +58,8 @@ To make a GET request, use the `get` method:
 
 ```typescript
 try {
-  const { response } = await client.get('/endpoint');
-  console.log(response);
+  const { data } = await client.get('/endpoint');
+  console.log(data);
 } catch (error) {
   console.error(error);
 }
@@ -70,8 +71,8 @@ To make a POST request, use the `post` method:
 
 ```typescript
 try {
-  const { response } = await client.post('/endpoint', { key: 'value' });
-  console.log(response);
+  const { data } = await client.post('/endpoint', { key: 'value' });
+  console.log(data);
 } catch (error) {
   console.error(error);
 }
@@ -83,8 +84,8 @@ To make a PUT request, use the `put` method:
 
 ```typescript
 try {
-  const { response } = await client.put('/endpoint', { key: 'value' });
-  console.log(response);
+  const { data } = await client.put('/endpoint', { key: 'value' });
+  console.log(data);
 } catch (error) {
   console.error(error);
 }
@@ -96,8 +97,8 @@ To make a PATCH request, use the `patch` method:
 
 ```typescript
 try {
-  const { response } = await client.patch('/endpoint', { key: 'value' });
-  console.log(response);
+  const { data } = await client.patch('/endpoint', { key: 'value' });
+  console.log(data);
 } catch (error) {
   console.error(error);
 }
@@ -109,8 +110,22 @@ To make a DELETE request, use the `delete` method:
 
 ```typescript
 try {
-  const { response } = await client.delete('/endpoint');
-  console.log(response);
+  const { data } = await client.delete('/endpoint');
+  console.log(data);
+} catch (error) {
+  console.error(error);
+}
+```
+
+#### Raw Response
+
+All of the methods also return the raw reponse returned by `fetch`.
+
+```typescript
+try {
+  const { rawResponse, data } = await client.get('/endpoint');
+  console.log(rawResponse);
+  console.log(data);
 } catch (error) {
   console.error(error);
 }
@@ -122,8 +137,8 @@ Errors are handled by throwing instances of `ApiError`. You can catch these erro
 
 ```typescript
 try {
-  const { response } = await client.get('/endpoint');
-  console.log(response);
+  const { data } = await client.get('/endpoint');
+  console.log(data);
 } catch (error) {
   if (error instanceof ApiError) {
     console.error(`Error: ${error.message}, Status: ${error.status}`);
@@ -131,22 +146,6 @@ try {
     console.error(error);
   }
 }
-```
-
-### Cancelling Requests
-
-You can cancel a request by its identifier using the `cancelRequest` method:
-
-```typescript
-const { requestId, response } = client.get('/endpoint');
-client.cancelRequest(requestId);
-
-/**
- * For usage where you want to be able to cancel the request, * the response would be awaited separately because requestId
- * is returned immeditately and response is a promise.
- */
-const { requestId, response } = client.get('/endpoint');
-const data = await response;
 ```
 
 ## License
