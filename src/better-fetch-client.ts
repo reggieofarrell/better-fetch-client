@@ -1,7 +1,7 @@
 /**
  * Configuration options for BetterFetchClient.
  */
- interface BetterFetchClientConfig {
+interface BetterFetchClientConfig {
   baseUrl: string;
   headers?: Record<string, string>;
   withRetry?: boolean;
@@ -117,7 +117,7 @@ export class BetterFetchClient {
         }
 
         throw new ApiResponseError(
-          `[${this.name}] - HTTP ${response.status} error`,
+          `[${this.name}] - HTTP ${response.status}`,
           response.status,
           errorResponse
         );
@@ -146,7 +146,7 @@ export class BetterFetchClient {
         }
 
         throw new ApiParseError(
-          `${this.name} - Failed to parse response`,
+          `[${this.name}] - Failed to parse response: ${err.message}`,
           response.status,
           errorResponse
         );
