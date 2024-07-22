@@ -1,6 +1,6 @@
 {
   "name": "better-fetch-client",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A generic REST API client based on native js fetch",
   "author": "Reggie O'Farrell",
   "license": "0BSD",
