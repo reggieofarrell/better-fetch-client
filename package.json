@@ -1,9 +1,12 @@
 {
-  "name": "better-fetch-client",
+  "name": "@reggieofarrell/better-fetch-client",
   "version": "1.0.1",
   "description": "A generic REST API client based on native js fetch",
   "author": "Reggie O'Farrell",
   "license": "0BSD",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com/"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
     "start": "tsc --watch",
