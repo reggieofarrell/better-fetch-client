@@ -124,14 +124,19 @@ export class BetterFetchClient {
       }
 
       try {
-        if (contentType?.includes('application/json')) {
+        const responseContentType = response.headers.get('Content-Type') || '';
+
+        if (responseContentType.includes('application/json')) {
           data = await response.json() as RT;
-        } else if (contentType?.includes('text/')) {
+        } else if (responseContentType.includes('text/')) {
           data = await response.text() as unknown as RT;
-        } else if (contentType?.includes('application/blob')) {
+        } else if (responseContentType.includes('application/blob')) {
           data = await response.blob() as unknown as RT;
+        } else if (responseContentType.includes('application/x-www-form-urlencoded')) {
+          const textData = await response.text();
+          data = new URLSearchParams(textData) as unknown as RT;
         } else {
-          throw new Error(`Unsupported response type: ${contentType}`);
+          throw new Error(`Unsupported response type: ${responseContentType}`);
         }
       } catch (err) {
         if (err.message.includes('Unsupported response type')) {
