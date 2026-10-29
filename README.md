@@ -151,3 +151,16 @@ try {
 ## License
 
 This project is licensed under the 0BSD License. See the [LICENSE](./license.txt) file for details.
+
+## Development checks
+
+Use Node.js 24 for development and CI (`nvm use`, then `npm ci`). This tooling runtime does not change
+the library's TypeScript output target or introduce a consumer Node.js engine restriction.
+
+Run `npm run build` before opening a pull request. The current `npm test` command is a placeholder;
+the package does not yet have an automated behavior test suite. CI verifies both compiled formats
+and their type declarations without reporting the placeholder as a passing test suite.
+
+Pull requests and pushes to `main` run these checks using locked dependencies. Tag publication
+reuses the same checks before a separate publishing job receives its existing registry credential.
+The package registry and tag-based release trigger remain unchanged.
